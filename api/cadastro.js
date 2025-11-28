@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 module.exports = async (req, res) => {
   // ✅ CORS - permite requisições de outros domínios
@@ -22,13 +22,64 @@ module.exports = async (req, res) => {
     // Extrai dados do formulário
     const { nome, cpf, email, celular, senha, confirmarSenha, dataCriacao } = req.body;
 
-    // ✅ VALIDAÇÕES
+    // ✅ VALIDAÇÕES BÁSICAS
     if (!nome || !cpf || !email || !celular || !senha) {
       return res.status(400).json({ error: 'Campos obrigatórios faltando' });
     }
 
+    // ✅ VALIDAÇÃO DE NOME
+    if (nome.trim().length < 3) {
+      return res.status(400).json({ error: 'Nome deve ter pelo menos 3 caracteres' });
+    }
+
+    // ✅ VALIDAÇÃO DE CPF
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    if (cpfLimpo.length !== 11) {
+      return res.status(400).json({ error: 'CPF deve conter 11 dígitos' });
+    }
+    
+    function validarCPF(s) {
+      if (["00000000000","11111111111","22222222222"].includes(s)) return false;
+      let soma = 0, resto;
+      for (let i = 1; i <= 9; i++) {
+        soma += parseInt(s.substring(i-1,i)) * (11-i);
+      }
+      resto = (soma * 10) % 11;
+      if (resto === 10 || resto === 11) resto = 0;
+      if (resto !== parseInt(s.substring(9,10))) return false;
+      soma = 0;
+      for (let i = 1; i <= 10; i++) {
+        soma += parseInt(s.substring(i-1,i)) * (12-i);
+      }
+      resto = (soma * 10) % 11;
+      if (resto === 10 || resto === 11) resto = 0;
+      return resto === parseInt(s.substring(10,11));
+    }
+    
+    if (!validarCPF(cpfLimpo)) {
+      return res.status(400).json({ error: 'CPF inválido' });
+    }
+
+    // ✅ VALIDAÇÃO DE EMAIL
+    const reEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!reEmail.test(email)) {
+      return res.status(400).json({ error: 'Email inválido' });
+    }
+
+    // ✅ VALIDAÇÃO DE CELULAR
+    const celularLimpo = celular.replace(/\D/g, '');
+    if (celularLimpo.length < 11) {
+      return res.status(400).json({ error: 'Celular deve ter pelo menos 11 dígitos' });
+    }
+
+    // ✅ VALIDAÇÃO DE SENHAS
     if (senha !== confirmarSenha) {
       return res.status(400).json({ error: 'Senhas não conferem' });
+    }
+
+    const reSenha = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+    if (!reSenha.test(senha)) {
+      return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres, incluir um número, uma letra maiúscula, uma letra minúscula e um caractere especial.' });
     }
 
     // Pega as chaves de variáveis de ambiente (SEGURAS!)
@@ -41,7 +92,7 @@ module.exports = async (req, res) => {
     }
 
     // ✅ VERIFICA SE DADOS JÁ EXISTEM
-    const filterFormula = encodeURIComponent(`OR({user_cpf}='${cpf}',{user_e-mail}='${email}',{user_mobile_nr}='${celular}')`);
+    const filterFormula = encodeURIComponent(`OR({user_cpf}='${cpfLimpo}',{user_e-mail}='${email}',{user_mobile_nr}='${celularLimpo}')`);
     const filterURL = `https://api.airtable.com/v0/${BASE}/${TABLE}?filterByFormula=${filterFormula}`;
     
     const checkRes = await fetch(filterURL, {
@@ -52,9 +103,9 @@ module.exports = async (req, res) => {
     if (checkData.records && checkData.records.length > 0) {
       const usados = new Set();
       checkData.records.forEach(r => {
-        if (r.fields['user_cpf'] === cpf) usados.add('CPF');
+        if (r.fields['user_cpf'] === cpfLimpo) usados.add('CPF');
         if (r.fields['user_e-mail'] === email) usados.add('E-mail');
-        if (r.fields['user_mobile_nr'] === celular) usados.add('Celular');
+        if (r.fields['user_mobile_nr'] === celularLimpo) usados.add('Celular');
       });
       return res.status(409).json({ 
         error: `Campos já em uso: ${[...usados].join(', ')}`
@@ -73,9 +124,9 @@ module.exports = async (req, res) => {
         records: [{
           fields: {
             user_name: nome.toUpperCase(),
-            user_cpf: cpf,
+            user_cpf: cpfLimpo,
             'user_e-mail': email,
-            user_mobile_nr: celular,
+            user_mobile_nr: celularLimpo,
             user_data_creation: dataCriacao,
             user_password: senha
           }
